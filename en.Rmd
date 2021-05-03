@@ -1,0 +1,617 @@
+---
+params: 
+  title: ""
+  publication_date: ""
+  doi: ""
+output: 
+  html_document:
+    anchor_sections: false
+    theme: null
+    highlight: null
+    mathjax: null
+    css: ["style.css", "https://fonts.googleapis.com/css?family=Source+Sans+Pro:400,700&display=swap"]
+    self_contained: true
+title: "`r params$title`"
+---
+
+```{r general-setup, include=FALSE}
+## This file contains the ENGLISH version of the data story
+
+# Set general chunk options
+knitr::opts_chunk$set(echo = FALSE, fig.showtext = TRUE, fig.retina = 3, 
+                      fig.align = "center", warning = FALSE, message = FALSE)
+
+# Install pacman package if needed
+if (!require("pacman")) {
+  install.packages("pacman")
+  library(pacman)
+}
+
+# Install snf.datastory package if not available, otherwise load it
+if (!require("snf.datastory")) {
+  if (!require("devtools")) {
+    install.packages("devtools")
+    library(devtools)
+  }
+  install_github("snsf-data/snf.datastory")
+  library(snf.datastory)
+}
+
+
+# Load packages
+p_load(tidyverse,
+       lubridate,
+       scales, 
+       conflicted, 
+       jsonlite,
+       here, 
+       ggiraph)
+
+# Conflict preferences
+conflict_prefer("filter", "dplyr")
+
+# Increase showtext package font resolution
+showtext_opts(dpi = 320)
+
+# Set the locale for date formatting (Windows)
+Sys.setlocale("LC_TIME", "English")
+
+# Create function to print number with local language-specific format 
+print_num <- function(x) snf.datastory::print_num(x, lang = "en")
+
+# Knitr hook for local formatting of printed numbers
+knitr::knit_hooks$set(
+  inline <- function(x) {
+    if (!is.numeric(x)) {
+      x
+    } else {
+      print_num(x)
+    }
+  }
+)
+```
+
+```{r print-header-infos, results='asis'}
+# Add publication date to header
+cat(format(as_datetime(params$publication_date), "%d.%m.%Y"))
+```
+
+```{r story-specific-setup, include=FALSE}
+# Set Load publications from 2018/19 with their calculated OA status
+pubs <- read_csv(here("data", "publications_2018_2019_dec_2020.csv")) %>%  
+  mutate(oa_status = case_when(oa_status == "green" ~ "green",
+                               oa_status == "other OA" ~ "other OA",
+                               oa_status == "closed" ~ "restricted",
+                               TRUE ~ oa_status),
+         oa_status = fct_relevel(oa_status, 
+                                 c("gold", "green", "hybrid", "other OA", 
+                                   "restricted"))) %>% 
+  # Strict SNSF OA rules only allow gold, green and hybrid to be OA (and not 
+  # "other OA" -> mainly non-peer-reviewed OA versions)
+  mutate(is_oa = oa_status %in% c("gold", "green", "hybrid")) 
+
+# Add disciplines level 3
+disps <- read_csv2(here("data", "disciplines.csv"))
+pubs <- pubs %>% 
+  left_join(disps, by = c("main_discipline_number" = "Number"))
+
+# Calculate shares of the OA colors
+oa_color_shares <- pubs %>% 
+  # Remove unknowns
+  filter(oa_status != "unknown") %>% 
+  count(oa_status) %>%  
+  mutate(freq = n / sum(n)) 
+
+# Calculate general OA share
+oa_shares <- oa_color_shares %>%  
+  mutate(is_oa = oa_status %in% c("gold", "green", "hybrid")) %>% 
+  group_by(is_oa) %>%  
+  summarise(sum_n = sum(n), sum_freq = sum(freq))
+
+# Define vector with the OA category colors used in the plots
+oa_colors <- c(
+  "gold" = "#406AF5",
+  "green" = "#90AAFF",
+  "hybrid" = "#CCD8FF",
+  "other OA" = "#AFAFAF",
+  "restricted" = "#4F4F4F"
+)
+
+# Extract some variables for the text
+snsf_oa_share <- oa_shares %>% 
+  filter(is_oa == TRUE) %>% 
+  pull(sum_freq) * 100
+
+snsf_closed_share <- oa_color_shares %>% 
+  filter(oa_status == "restricted") %>% 
+  pull(freq) * 100
+
+gold_share <- oa_color_shares %>% 
+  filter(oa_status == "gold") %>% 
+  pull(freq) * 100
+
+green_share <- oa_color_shares %>% 
+  filter(oa_status == "green") %>% 
+  pull(freq) * 100
+
+hybrid_share <- oa_color_shares %>% 
+  filter(oa_status == "hybrid") %>% 
+  pull(freq) * 100
+ 
+other_oa_share <- oa_color_shares %>% 
+  filter(oa_status == "other OA") %>% 
+  pull(freq) * 100
+
+```
+
+__In some disciplines nearly all publications based on SNSF-funded research are in open access mode, in others still only a few. Overall, the share of open access publications is growing slowly but steadily.__
+
+The results of research funded by the SNSF need to be freely accessible. Open access (OA) means that scientific publications are available to all interested parties via the internet free of charge. The SNSF supports this principle by covering the publication costs. It communicates the importance of OA publishing to both researchers and the public. It also continually collects data on the OA status of publications resulting from SNSF funding.
+
+Overall, there were `r nrow(pubs)` publications in 2018 and 2019. A check done in December 2020 showed that `r round(snsf_oa_share)` percent of these publications were open access according to the SNSF standard. This means they are freely accessible via either the "gold" (`r round(gold_share)` percent), the "green" (`r round(green_share)` percent) or the "hybrid" road (`r round(hybrid_share)` percent) (see box on OA categories).
+
+A further `r round(other_oa_share)` percent fall into the category "other OA". While their content is freely available on the internet, they cannot be assigned clearly to one of the OA categories. Often they are pre-prints that have not yet been peer reviewed. Such publications do not meet the SNSF OA requirements because the freely accessible version might differ from the final version. Therefore they do not offer a fully fledged alternative to paid access.
+
+Nearly a quarter (`r round(snsf_closed_share)` percent) of the publications are "restricted", i.e. access is only granted against a fee.
+
+<div class="plot-box">
+<div class="plot-title">OA shares of funded publications 2018 and 2019</div>
+<div class="hide-mobile">
+```{r oa-color-graph, out.width="100%", fig.height=2.5}
+# Function to create the overall color shares plot
+create_color_share_plot <- function() {
+  oa_color_shares %>%
+    ggplot(aes(x = fct_rev(oa_status), y = freq, fill = oa_status,
+               tooltip = paste0(oa_status, ", ", round(freq * 100), "%, ", 
+                             print_num(n), " publications", 
+                             " published in 2018/2019"))) + 
+    geom_col_interactive(width = 0.8) +
+    geom_text(
+      aes(y = (freq - 0.025), 
+          label = paste0(round(freq * 100), "%")), 
+      size = 3, hjust = 0.5, family = "Source Sans Pro",
+      color = "white", fontface = "bold") +
+    coord_flip() +
+    labs(x = NULL, y = NULL) +
+    scale_y_continuous(labels = percent_format(accuracy = 1)) +
+    scale_fill_manual(values = oa_colors) + 
+    get_datastory_theme(legend_position = "none", text_axis = "y") 
+}
+
+# Create ggiraph object
+girafe(ggobj = create_color_share_plot(), 
+       height_svg = 2.5, 
+       options = list(
+         opts_toolbar(saveaspng = FALSE),
+         # opts_hover(css = "fill:#F75858;stroke:#F75858;"),
+         opts_tooltip(
+           css = get_ggiraph_tooltip_css(),
+           opacity = 0.8,
+           delay_mouseover = 0,
+           delay_mouseout = 0
+         )
+       ))
+```
+<div class="caption">
+Works published in 2018-2019 and reported to the SNSF as a product of SNSF-funded research, <a href="http://p3.snf.ch/" target="_blank">SNSF P3</a>.
+</div>
+</div>
+
+<div class="hide-tablet hide-desktop">
+```{r oa-color-graph-mobile, out.width="100%", fig.height=2.5}
+create_color_share_plot()
+```
+<div class="caption">
+Works published in 2018-2019 and reported to the SNSF as a product of SNSF-funded research, <a href="http://p3.snf.ch/" target="_blank">SNSF P3</a>.
+</div>
+</div>
+
+### Pushing ahead with transformation
+
+The current OA share of `r round(snsf_oa_share)` percent is higher than in many other countries. But there is still a way to go till the SNSF's 100 percent goal is achieved. How does it plan to reach this target? On the one hand, it is working to further simplify publication in journals that are purely OA. For example, it will settle the publication costs directly with the publisher, thereby reducing the burden on researchers. On the other hand, the SNSF sends the researchers specific information on the status of their publications. Every year, they receive an email for publications based on SNSF-funded research. And they can use the service "SNSF Open Access Check" on all of their articles.
+
+<div class='info-box'>
+
+### Personal OA check with one click
+
+Which of my scientific publications are freely accessible? Researchers in Switzerland can find the answer to this question through the "SNSF Open Access Check" web application. The prototype developed by the SNSF finds scientific articles whether the research was funded by the SNSF or not.
+
+<a href="http://www.snsf-oa-check.ch/" target="_blank">SNSF Open Access Check</a>
+</div>
+
+```{r research-area-oa-shares}
+# Calculate the OA shares of the research area
+research_area_shares <- pubs %>% 
+  filter(oa_status != "unknown", 
+         main_discipline_level1 %in% c("Div 1", "Div 2", "Div 3")) %>%
+  mutate(main_discipline_level1 = 
+           case_when(main_discipline_level1 == "Div 1" ~ "SSH", 
+                     main_discipline_level1 == "Div 2" ~ "MINT", 
+                     main_discipline_level1 == "Div 3" ~ "LS", 
+                     TRUE ~ "Unknown")) %>% 
+  count(main_discipline_level1, oa_status) %>% 
+  group_by(main_discipline_level1) %>%  
+  mutate(freq = n / sum(n)) %>%
+  ungroup()
+
+# Extract some variables for the text
+ssh_share <- research_area_shares %>% 
+  filter(main_discipline_level1 == "SSH", 
+         oa_status %in% c("gold", "green", "hybrid")) %>% 
+  pull(freq) %>% 
+  sum() * 100
+
+mint_share <- research_area_shares %>% 
+  filter(main_discipline_level1 == "MINT", 
+         oa_status %in% c("gold", "green", "hybrid")) %>% 
+  pull(freq) %>% 
+  sum() * 100
+
+ls_share <- research_area_shares %>% 
+  filter(main_discipline_level1 == "LS", 
+         oa_status %in% c("gold", "green", "hybrid")) %>% 
+  pull(freq) %>% 
+  sum() * 100
+```
+
+
+### Biology and medicine leading the field
+
+There are marked differences between research areas. In the social sciences and humanities (SSH), `r round(ssh_share)` percent of the analysed publications are open access within the meaning of the SNSF definition. For mathematics, natural and engineering sciences (MINT), this share climbs to `r round(mint_share)` percent, and in biology and medicine (LS) to `r round(ls_share)` percent or nearly three-quarters of the analysed publications.
+
+<div class="plot-box">
+<div class="plot-title">OA categories by research area</div>
+<div class="hide-mobile">
+```{r oa-shares-disp-1, out.width="100%", fig.height=2}
+# Function to create the level 1 color shares plot
+create_color_share_lvl1_plot <- function() {
+  research_area_shares %>%  
+    # Translate research area to respective language version
+    mutate(
+      main_discipline_level1 = translate_research_area(main_discipline_level1, 
+                                                       target_lang = "en"), 
+      main_discipline_level1 = fct_relevel(main_discipline_level1, 
+                                           c("SSH", "MINT", "LS"))) %>% 
+    ggplot(aes(x = fct_rev(main_discipline_level1), y = freq, 
+               fill = fct_rev(oa_status), 
+               tooltip = paste0("<b>", main_discipline_level1, "</b><br>", 
+                             round(freq * 100), 
+                             "% - ", print_num(n),
+                             " publications",
+                             " published in 2018/19 are <b>", oa_status, 
+                             "</b>"))) +
+    # Hack: Add a geom_col under the interactive one, only to be able to provide
+    # correct looking legend items (round although bar chart), 
+    # geom_col_interactive does not take the argument 'key_glyph'
+    geom_col(width = 0.1, size = 0.1,
+             # Draw point instead of square symbol
+             key_glyph = draw_key_dotplot
+    ) +
+    geom_col_interactive(color = "white", show.legend = FALSE) +
+    geom_text(aes(label = paste0(round(freq * 100), "%")), 
+              position = position_stack(vjust = 0.5), 
+              size = 3, color = "white", fontface = "bold", 
+              family = "Source Sans Pro") +
+    scale_y_continuous(labels = percent_format(accuracy = 1), 
+                       expand = c(0.03, 0)) +
+    scale_fill_manual(values = oa_colors,  
+                      guide = guide_legend(override.aes = list(size = 6), 
+                                           reverse = TRUE)) +
+    labs(x = NULL, y = NULL) +
+    coord_flip() + 
+    get_datastory_theme(legend_key_size = c(1, 1)) 
+}
+
+# Create ggiraph object
+girafe(ggobj = create_color_share_lvl1_plot(),
+       height_svg = 2, 
+       options = list(
+         opts_toolbar(saveaspng = FALSE),
+         # opts_hover(css = "fill:#F75858;stroke:#F75858;"),
+         opts_tooltip(
+           css = get_ggiraph_tooltip_css(),
+           opacity = 0.8,
+           delay_mouseover = 0,
+           delay_mouseout = 0
+         )
+       ))
+```
+<div class="caption">
+Works published in 2018-2019 and reported to the SNSF as a product of SNSF-funded research, <a href="http://p3.snf.ch/" target="_blank">SNSF P3</a>.
+</div>
+</div>
+
+<div class="hide-tablet hide-desktop">
+```{r oa-shares-disp-1-mobile, out.width="100%", fig.height=2}
+create_color_share_lvl1_plot() 
+```
+<div class="caption">
+Works published in 2018-2019 and reported to the SNSF as a product of SNSF-funded research, <a href="http://p3.snf.ch/" target="_blank">SNSF P3</a>.
+</div>
+</div>
+
+There are a number of reasons for these disparities. For instance, the selection of high-quality open access journals is not large enough in every research area. And publication formats that differ from the scientific article pose an additional challenge in the conversion to open access. <a href="http://www.snf.ch/en/researchinFocus/newsroom/Pages/news-200326-235-funded-open-access-books.aspx" target="_blank">The SNSF also expressly promotes open access books and book chapters</a>, but the OA publication landscape for these formats is even less developed than for articles. Moreover, metadata availability is often a problem in the case of books and book chapters. The OA shares are therefore probably underestimated in the analyses, and hence the mentioned figures should be seen as a lower limit.
+
+```{r discipline-2-text-variable}
+# Summarize and extract some variables for the text
+discipline_2_shares <- pubs %>% 
+  filter(oa_status != "unknown") %>%
+  mutate(is_oa = oa_status %in% c("gold", "green", "hybrid")) %>% 
+  count(main_discipline_level2, is_oa) %>% 
+  group_by(main_discipline_level2) %>% 
+  mutate(freq = n / sum(n)) %>% 
+  ungroup() %>% 
+  filter(is_oa == TRUE) %>% 
+  arrange(-freq)
+  
+# Get some variables for the text
+top_share <- discipline_2_shares %>% 
+  slice(1) %>% 
+  pull(freq) * 100
+
+top_2_share <- discipline_2_shares %>% 
+  slice(2) %>% 
+  pull(freq) * 100
+
+bottom_share <- discipline_2_shares %>% 
+  slice(nrow(discipline_2_shares)) %>% 
+  pull(freq) * 100
+
+art_lvl2_name <- 
+  "Art studies, musicology, theatre and film studies, architecture"
+
+art_perc <- discipline_2_shares %>% 
+  filter(main_discipline_level2 == art_lvl2_name) %>% 
+  pull(freq) * 100 
+
+art_other_oa_perc <- pubs %>% 
+  filter(oa_status != "unknown", 
+         main_discipline_level2 == art_lvl2_name) %>% 
+  count(oa_status) %>% 
+  mutate(freq = n / sum(n)) %>% 
+  filter(oa_status == "other OA") %>% 
+  pull(freq) * 100
+```
+
+### Between `r round(top_share)` and `r round(bottom_share)` percent
+
+There are also major differences between the individual disciplines. Social medicine and biology as a basic science `r ifelse(round(top_share) == round(top_2_share), paste0("top the list with ", round(top_share), " percent"), stop("Text error, top shares not equal."))` freely accessible publications each.
+
+Most of the inaccessible publications can be found in art studies, musicology, theatre and film studies, and architecture. In these disciplines, only `r round(art_perc)` percent are open access in line with the SNSF definition. On taking a closer look, however, we can see that the "other OA" category is very large at `r round(art_other_oa_perc)` percent. Data quality in the humanities and social sciences, and particularly the mentioned disciplines, is generally lower than in other research areas. A clear assessment of OA status is therefore not possible for numerous publications because of missing information.
+
+<div class="plot-box">
+<div class="plot-title">Which disciplines publish the most in open access?</div>
+<div class="hide-mobile">
+
+```{r oa-shares-disp-2, out.width="100%", fig.height=7}
+# Summarize the data for the plot
+plot_data <- pubs %>% 
+  filter(oa_status != "unknown") %>%
+  count(main_discipline_level2, oa_status) %>% 
+  group_by(main_discipline_level2) %>%  
+  mutate(freq = n / sum(n)) %>%
+  ungroup()
+
+# Extract ordering (after closed share)
+plot_ordering <- plot_data %>%
+  filter(oa_status == "restricted") %>% 
+  arrange(freq) %>% 
+  mutate(order = row_number()) %>% 
+  select(main_discipline_level2, order)
+
+# Calculate discipline totals
+plot_totals <- plot_data %>%
+  group_by(main_discipline_level2) %>%  
+  summarise(sum_n = sum(n)) %>% 
+  ungroup() 
+
+# Create the texts for the discipline tooltip (level 3 discipline counts)
+discipline_tooltip <- pubs %>% 
+  # Remove unknowns
+  filter(oa_status != "unknown") %>% 
+  count(main_discipline_level2, Discipline) %>% 
+  arrange(main_discipline_level2, ) %>% 
+  group_by(main_discipline_level2) %>%  
+  summarise(disps = paste(paste0(Discipline, " (", n, ")"), collapse = "<br>"))
+
+# Join additional data to the plot data
+plot_data <- plot_data %>%  
+  left_join(plot_ordering, by = "main_discipline_level2") %>% 
+  left_join(plot_totals, by = "main_discipline_level2")
+
+# Join additional data to the ordering data subset
+plot_ordering <- plot_ordering %>%  
+  left_join(discipline_tooltip, by = "main_discipline_level2") %>%  
+  left_join(plot_totals, by = "main_discipline_level2")
+
+# Function to create the level 1 color shares plot
+create_color_share_lvl2_plot <- function() {
+  plot_data %>% 
+    ggplot(aes(x = reorder(main_discipline_level2, -order), y = freq)) + 
+    # Hack: Add a geom_col under the interactive one, only to be able to provide
+    # correct looking legend items (round although bar chart), 
+    # geom_col_interactive does not take the argument 'key_glyph'
+    geom_col(aes(fill = fct_rev(oa_status)), 
+             width = 0.1, size = 0.1,
+             # Draw point instead of square symbol
+             key_glyph = draw_key_dotplot
+    ) +
+    geom_col_interactive(
+      aes(fill = fct_rev(oa_status), 
+          tooltip = paste0("<b>", main_discipline_level2, "</b><br>", 
+                        print_num(n), 
+                        " publications category <b>", 
+                        oa_status, "</b> (<b>", 
+                        round(freq * 100), "%</b>)", 
+                        " published in 2018/19")), 
+      color = "white", position = "stack", show.legend = FALSE) +
+    # Percentage label & tooltip
+    geom_text(aes(
+      label = ifelse(freq >= 0.1, paste0(round(freq * 100), "%"), ""),
+      y = (freq + 0.007)),
+      position = position_stack(vjust = 0.5),
+      size = 3, color = "white", fontface = "bold",
+      family = "Source Sans Pro") +
+    # Discipline label & tooltip
+    geom_text_interactive(data = plot_ordering,
+              aes(x = main_discipline_level2, y = -0.025,
+                  tooltip = paste0("<b>", main_discipline_level2, "</b> (", 
+                                print_num(sum_n), 
+                                " publications)<br>", disps),
+                  label = str_trunc(main_discipline_level2, 40)),
+              color = "#4D4D4D", hjust = 1, size = 3,
+              family = "Source Sans Pro") +
+    scale_y_continuous(labels = percent_format(accuracy = 1),
+                       limits = c(-0.65, 1.01), 
+                       breaks = seq(0, 1, 0.25), 
+                       expand = c(0, 0.005)
+                       ) +
+    scale_fill_manual(values = oa_colors, 
+                      guide = guide_legend(override.aes = list(size = 6), 
+                                           reverse = TRUE)) +
+    labs(x = NULL, y = NULL) +
+    coord_flip() + 
+    get_datastory_theme() + 
+    theme(axis.text.y = element_blank())
+}
+
+# Create ggiraph object
+girafe(ggobj = create_color_share_lvl2_plot(),
+       fonts = list(sans = "Source Sans Pro", 
+                    serif = "Source Sans Pro"),
+       height_svg = 7, 
+       options = list(
+         opts_toolbar(saveaspng = FALSE),
+         opts_tooltip(
+           css = get_ggiraph_tooltip_css(),
+           opacity = 0.8,
+           delay_mouseover = 0,
+           delay_mouseout = 0
+         )
+       ))
+```
+<div class="caption">
+Works published in 2018-2019 and reported to the SNSF as a product of SNSF-funded research, <a href="http://p3.snf.ch/" target="_blank">SNSF P3</a>.
+</div>
+</div>
+
+<div class="hide-tablet hide-desktop">
+```{r oa-shares-disp-2-mobile, out.width="100%", fig.height=7}
+create_color_share_lvl2_plot()
+```
+<div class="caption">
+Works published in 2018-2019 and reported to the SNSF as a product of SNSF-funded research, <a href="http://p3.snf.ch/" target="_blank">SNSF P3</a>.
+</div>
+</div>
+
+
+## OA share growing steadily
+
+Compared to previous checks, the latest analysis has brought to light the following three developments:
+
+* The share of freely accessible publications has been growing steadily. During the 2018-2019 period, 55 percent of publications produced by SNSF-funded researchers were available as open access publications to all interested parties in the long term. During the 2014-2018 period the figure was 48 percent, during the 2013-2015 period 39 percent.
+* The number of publications that are only accessible against payment is significantly lower than in past years. The SNSF is reinforcing its efforts to bring this 23 percent share down to zero.
+* The share of publications that defy unequivocal classification has risen slightly. To solve this largely technical problem, the SNSF has joined forces with higher education institutions and international partners with the aim of enhancing the necessary infrastructure.
+
+High demand for the measures introduced in 2018 to promote OA articles, books and book chapters has also played a role in the positive development. As the SNSF continues its 'ascent' to 100 percent OA, it will be focusing on further simplifying OA publications for researchers. At the same time, it will endeavour to support the development of OA publication options, particularly in disciplines where there are gaps to be filled.
+
+<div class="plot-box">
+<div class="plot-title">Comparison with the results of previous OA monitorings</div>
+<div class="hide-mobile">
+```{r former-oa-monitorings, out.width="100%", fig.height=3}
+# Data of OA monitorings since 2013
+former_monitorings <- tibble(window = c("2013-2015", 
+                                        "2014-2018", 
+                                        "2018-2019"), 
+                             open_perc = c(39, 48, 55), 
+                             closed_perc = c(44, 33, 23), 
+                             other_oa_perc = c(17, 19, 22)) %>%  
+  # To long format
+  pivot_longer(cols = c(open_perc, closed_perc, other_oa_perc))
+
+# Function to create the former monitorings plot
+create_former_monitoring_plot <- function() {
+  former_monitorings %>%  
+    # Ordering and labels
+    mutate(name = case_when(name == "closed_perc" ~ "restricted", 
+                            name == "open_perc" ~ "SNSF OA (gold, green, hybrid)", 
+                            name == "other_oa_perc" ~ "other OA", 
+                            TRUE ~ "Unknown"), 
+           name = fct_relevel(name, c("SNSF OA (gold, green, hybrid)", 
+                                      "other OA", 
+                                      "restricted"))) %>% 
+    ggplot(aes(x = name, y = value, fill = window, 
+               tooltip = paste0(window, ", ", value, "% ", name))) + 
+    # Hack: Add a geom_col under the interactive one, only to be able to provide
+    # correct looking legend items (round although bar chart), 
+    # geom_col_interactive does not take the argument 'key_glyph'
+    geom_col(position = position_dodge(width = 0.5), 
+             width = 0.1, size = 0.1,
+             # Draw point instead of square symbol
+             key_glyph = draw_key_dotplot
+    ) +
+    geom_col_interactive(position = position_dodge(width = 0.5), width = 0.5, 
+             color = "white", show.legend = FALSE) + 
+    geom_text(aes(label = paste0(value, "%"), 
+                  y = (value - 6)), hjust = 0.5, color = "white", 
+              fontface = "bold", 
+              position = position_dodge(width = 0.5), size = 3) +
+    scale_y_continuous(labels = percent_format(accuracy = 1, scale = 1), 
+                       limits = c(0, 60), breaks = seq(0, 60, 10)) +
+    scale_fill_manual(values = get_datastory_scheme(palette = "blue_seq")) +
+    labs(x = NULL, y = NULL) + 
+    get_datastory_theme(text_axis = "x")
+}
+
+# Create ggiraph object
+girafe(ggobj = create_former_monitoring_plot(), 
+       height_svg = 2.5, 
+       options = list(
+         opts_toolbar(saveaspng = FALSE),
+         # opts_hover(css = "fill:#F75858;stroke:#F75858;"),
+         opts_tooltip(
+           css = get_ggiraph_tooltip_css(),
+           opacity = 0.8,
+           delay_mouseover = 0,
+           delay_mouseout = 0
+         )
+       ))
+```
+<div class="caption">
+Works published in 2018-2019 and reported to the SNSF as a product of SNSF-funded research, <a href="http://p3.snf.ch/" target="_blank">SNSF P3</a>. The base of data is constantly changing; the results of previous OA monitorings are snapshots of the situation at the respective monitoring dates.
+</div>
+</div>
+
+<div class="hide-tablet hide-desktop">
+```{r former-oa-monitorings-mobile, out.width="100%", fig.height=3}
+create_former_monitoring_plot()
+```
+<div class="caption">
+Works published in 2018-2019 and reported to the SNSF as a product of SNSF-funded research, <a href="http://p3.snf.ch/" target="_blank">SNSF P3</a>. The base of data is constantly changing; the results of previous OA monitorings are snapshots of the situation at the respective monitoring dates.
+</div>
+</div>
+
+<div class='info-box'>
+
+### OA categories
+
+The different open access categories are defined below. __Gold__, __green__ and __hybrid__ meet the OA requirements of the SNSF.
+
+* __Gold__: immediately freely accessible in a purely OA journal or as an OA book or book chapter, usually on payment of a fee.
+* __Green__: freely accessible as a second publication in an institutional or disciplinary archive, often after expiry of an embargo period.
+* __Hybrid__: freely accessible in a journal that is otherwise not OA, on payment of an activation fee.
+* __Other OA__: freely accessible, but does not meet all the required criteria.
+* __Restricted__: no freely accessible version found. 
+
+
+### Data 
+
+* Publications: works published in 2018-2019 and reported to the SNSF as a product of SNSF-funded research, <a href="http://p3.snf.ch/" target="_blank">SNSF P3</a>.
+    + Publications that have not been peer reviewed are excluded.
+    + Publication type "book chapter" is excluded.
+    + Publications without DOI are excluded.
+* The OA-specific metadata for the publications (OA version, location, etc.) was sourced from the data provider <a href="https://unpaywall.org/" target="_blank">Unpaywall</a>.
+* Date of analysis: 14 December 2020
+
+
+</div>

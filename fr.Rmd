@@ -1,0 +1,622 @@
+---
+params: 
+  title: ""
+  publication_date: ""
+  doi: ""
+output: 
+  html_document:
+    anchor_sections: false
+    theme: null
+    highlight: null
+    mathjax: null
+    css: ["style.css", "https://fonts.googleapis.com/css?family=Source+Sans+Pro:400,700&display=swap"]
+    self_contained: true
+title: "`r params$title`"
+---
+
+```{r general-setup, include=FALSE}
+## This file contains the FRENCH version of the data story
+
+# Set general chunk options
+knitr::opts_chunk$set(echo = FALSE, fig.showtext = TRUE, fig.retina = 3, 
+                      fig.align = "center", warning = FALSE, message = FALSE)
+
+# Install pacman package if needed
+if (!require("pacman")) {
+  install.packages("pacman")
+  library(pacman)
+}
+
+# Install snf.datastory package if not available, otherwise load it
+if (!require("snf.datastory")) {
+  if (!require("devtools")) {
+    install.packages("devtools")
+    library(devtools)
+  }
+  install_github("snsf-data/snf.datastory")
+  library(snf.datastory)
+}
+
+
+# Load packages
+p_load(tidyverse,
+       lubridate,
+       scales, 
+       conflicted, 
+       jsonlite,
+       here, 
+       ggiraph)
+
+# Conflict preferences
+conflict_prefer("filter", "dplyr")
+
+# Increase showtext package font resolution
+showtext_opts(dpi = 320)
+
+# Set the locale for date formatting (Windows)
+Sys.setlocale("LC_TIME", "French")
+
+# Create function to print number with local language-specific format 
+print_num <- function(x) snf.datastory::print_num(x, lang = "fr")
+
+# Knitr hook for local formatting of printed numbers
+knitr::knit_hooks$set(
+  inline <- function(x) {
+    if (!is.numeric(x)) {
+      x
+    } else {
+      print_num(x)
+    }
+  }
+)
+```
+
+```{r print-header-infos, results='asis'}
+# Add publication date to header
+cat(format(as_datetime(params$publication_date), "%d.%m.%Y"))
+```
+
+```{r story-specific-setup, include=FALSE}
+# Set Load publications from 2018/19 with their calculated OA status
+pubs <- read_csv(here("data", "publications_2018_2019_dec_2020.csv")) %>%  
+  mutate(oa_status = case_when(oa_status == "green" ~ "green",
+                               oa_status == "other OA" ~ "autres OA",
+                               oa_status == "hybrid" ~ "hybride",
+                               oa_status == "closed" ~ "restreint",
+                               TRUE ~ oa_status),
+         oa_status = fct_relevel(oa_status, 
+                                 c("gold", "green", "hybride", "autres OA", 
+                                   "restreint"))) %>% 
+  # Strict SNSF OA rules only allow gold, green and hybrid to be OA (and not 
+  # "other OA" -> mainly non-peer-reviewed OA versions)
+  mutate(is_oa = oa_status %in% c("gold", "green", "hybride")) 
+
+# Add disciplines level 3
+disps <- read_csv2(here("data", "disciplines.csv"))
+pubs <- pubs %>% 
+  left_join(disps, by = c("main_discipline_number" = "Number")) %>%  
+  # Add the translations of the level 2 disciplines
+  left_join(disps %>%  
+              rename(Discipline_level2 = Discipline, 
+                     Discipline_De_level2 =  Discipline_De, 
+                     Discipline_Fr_level2 =  Discipline_Fr), 
+            by = c("main_discipline_level2" = "Discipline_level2"))
+
+# Calculate shares of the OA colors
+oa_color_shares <- pubs %>% 
+  # Remove unknowns
+  filter(oa_status != "unknown") %>% 
+  count(oa_status) %>%  
+  mutate(freq = n / sum(n)) 
+
+# Calculate general OA share
+oa_shares <- oa_color_shares %>%  
+  mutate(is_oa = oa_status %in% c("gold", "green", "hybride")) %>% 
+  group_by(is_oa) %>%  
+  summarise(sum_n = sum(n), sum_freq = sum(freq))
+
+# Define vector with the OA category colors used in the plots
+oa_colors <- c(
+  "gold" = "#406AF5",
+  "green" = "#90AAFF",
+  "hybride" = "#CCD8FF",
+  "autres OA" = "#AFAFAF",
+  "restreint" = "#4F4F4F"
+)
+
+# Extract some variables for the text
+snsf_oa_share <- oa_shares %>% 
+  filter(is_oa == TRUE) %>% 
+  pull(sum_freq) * 100
+
+snsf_closed_share <- oa_color_shares %>% 
+  filter(oa_status == "restreint") %>% 
+  pull(freq) * 100
+
+gold_share <- oa_color_shares %>% 
+  filter(oa_status == "gold") %>% 
+  pull(freq) * 100
+
+green_share <- oa_color_shares %>% 
+  filter(oa_status == "green") %>% 
+  pull(freq) * 100
+
+hybrid_share <- oa_color_shares %>% 
+  filter(oa_status == "hybride") %>% 
+  pull(freq) * 100
+ 
+other_oa_share <- oa_color_shares %>% 
+  filter(oa_status == "autres OA") %>% 
+  pull(freq) * 100
+
+```
+
+__Dans certaines disciplines de recherche financées par le FNS, presque toutes les publications sont en libre accès alors que dans d’autres, très peu le sont. Dans l’ensemble, la proportion de libre accès continue à progresser lentement.__
+
+Quand le FNS finance une recherche, les résultats de celle-ci doivent être librement accessibles. Le principe du libre accès (Open Access, OA) signifie que les publications scientifiques doivent être disponibles gratuitement sur Internet, pour toutes les personnes intéressées, dans le monde entier. Pour y parvenir, le FNS prend en charge le coût des publications. Il communique largement sur l’importance du libre accès auprès des scientifiques et du grand public. Il collecte régulièrement des données sur le statut de libre accès des publications issues des recherches qu’il finance.
+
+En 2018 et 2019, `r nrow(pubs)` de ces publications sont parues. Au moment de l’analyse de décembre 2020, `r round(snsf_oa_share)` % étaient en libre accès selon les critères du FNS, dont `r round(gold_share)` % dans la catégorie « Gold », `r round(green_share)` % dans la catégorie « Green » et `r round(hybrid_share)` % dans la catégorie « hybride » (voir l’encadré sur les catégories OA).
+
+La catégorie « autres OA » regroupe `r round(other_oa_share)` % des publications. Il s’agit de celles dont le contenu est bien disponible en libre accès sur Internet mais qui n’entrent pas clairement dans l’une des catégories du FNS. C’est par exemple souvent le cas des versions préliminaires qui n’ont pas encore été évaluées par les pairs (peer review). L'obligation de libre accès du FNS n'est donc pas respectée car la version en libre accès peut être différente de la version finale publiée et ne constitue donc pas une solution de rechange à part entière à la version en accès payant.
+
+Une publication sur quatre environ (`r round(snsf_closed_share)` %) est disponible uniquement moyennant paiement, autrement dit en accès « restreint ».
+
+<div class="plot-box">
+<div class="plot-title">Categories OA des publications financées 2018 et 2019</div>
+<div class="hide-mobile">
+```{r oa-color-graph, out.width="100%", fig.height=2.5}
+# Function to create the overall color shares plot
+create_color_share_plot <- function() {
+  oa_color_shares %>%
+    ggplot(aes(x = fct_rev(oa_status), y = freq, fill = oa_status,
+               tooltip =  paste0(oa_status, ", ", round(freq * 100), " %, ", 
+                                 print_num(n), " publications", 
+                                 " publiées en 2018/2019"))) + 
+    geom_col_interactive(width = 0.8) +
+    geom_text(
+      aes(y = (freq - 0.025), 
+          label = paste0(round(freq * 100), "%")), 
+      size = 3, hjust = 0.5, family = "Source Sans Pro",
+      color = "white", fontface = "bold") +
+    coord_flip() +
+    labs(x = NULL, y = NULL) +
+    scale_y_continuous(labels = percent_format(accuracy = 1)) +
+    scale_fill_manual(values = oa_colors) + 
+    get_datastory_theme(legend_position = "none", text_axis = "y") 
+}
+# Create ggiraph object
+girafe(ggobj = create_color_share_plot(), 
+       height_svg = 2.5, 
+       options = list(
+         opts_toolbar(saveaspng = FALSE),
+         # opts_hover(css = "fill:#F75858;stroke:#F75858;"),
+         opts_tooltip(
+           css = get_ggiraph_tooltip_css(),
+           opacity = 0.8,
+           delay_mouseover = 0,
+           delay_mouseout = 0
+         )
+       ))
+```
+<div class="caption">
+Publications parues en 2018-2019, déclarées au FNS comme résultat de ses subsides, <a href="http://p3.snf.ch/" target="_blank">FNS P3</a>.
+</div>
+</div>
+
+<div class="hide-tablet hide-desktop">
+```{r oa-color-graph-mobile, out.width="100%", fig.height=2.5}
+create_color_share_plot()
+```
+<div class="caption">
+Publications parues en 2018-2019, déclarées au FNS comme résultat de ses subsides, <a href="http://p3.snf.ch/" target="_blank">FNS P3</a>.
+</div>
+</div>
+
+### Accélérer le changement
+
+Située à `r round(snsf_oa_share)` %, la proportion actuelle de publications en libre accès se trouve dans la fourchette haute en comparaison internationale, mais le FNS est encore loin de son objectif de 100 % en la matière. Comment y parvenir ? D’une part, en facilitant encore la publication dans des revues exclusivement en libre accès. Par exemple, le FNS réglera les frais de publication directement aux maisons d’édition et en déchargera ainsi les scientifiques. D’autre part, il fournit aux chercheuses et chercheurs des informations ciblées sur le statut de leur publication en leur envoyant chaque année un courriel concernant les publications issues de recherches qu’il a financées. Les chercheuses et chercheurs peuvent aussi utiliser le service « SNSF Open Access Check » pour tous leurs articles.
+
+<div class='info-box'>
+
+### Un contrôle personnel du libre accès en un clic
+
+Lesquels de mes articles scientifiques sont en libre accès ? Les chercheuses et chercheurs de Suisse peuvent répondre à cette question à l’aide du programme en ligne « SNSF Open Access Check ». Le prototype développé par le FNS répertorie des articles scientifiques, que la recherche dont ils sont tirés ait ou non été encouragée par le FNS.
+
+<a href="http://www.snsf-oa-check.ch/" target="_blank">SNSF Open Access Check</a>
+</div>
+
+```{r research-area-oa-shares}
+# Calculate the OA shares of the research area
+research_area_shares <- pubs %>% 
+  filter(oa_status != "unknown", 
+         main_discipline_level1 %in% c("Div 1", "Div 2", "Div 3")) %>%
+  mutate(main_discipline_level1 = 
+           case_when(main_discipline_level1 == "Div 1" ~ "SSH", 
+                     main_discipline_level1 == "Div 2" ~ "MINT", 
+                     main_discipline_level1 == "Div 3" ~ "LS", 
+                     TRUE ~ "Unknown")) %>% 
+  count(main_discipline_level1, oa_status) %>% 
+  group_by(main_discipline_level1) %>%  
+  mutate(freq = n / sum(n)) %>%
+  ungroup()
+
+# Extract some variables for the text
+ssh_share <- research_area_shares %>% 
+  filter(main_discipline_level1 == "SSH", 
+         oa_status %in% c("gold", "green", "hybride")) %>% 
+  pull(freq) %>% 
+  sum() * 100
+
+mint_share <- research_area_shares %>% 
+  filter(main_discipline_level1 == "MINT", 
+         oa_status %in% c("gold", "green", "hybride")) %>% 
+  pull(freq) %>% 
+  sum() * 100
+
+ls_share <- research_area_shares %>% 
+  filter(main_discipline_level1 == "LS", 
+         oa_status %in% c("gold", "green", "hybride")) %>% 
+  pull(freq) %>% 
+  sum() * 100
+```
+
+
+### Biologie et médecine en tête de peloton
+
+Les différences sont considérables entre les différents domaines de recherche. Dans les sciences humaines et sociales (SHS), `r round(ssh_share)` % des publications examinées sont en libre accès au sens de la définition du FNS. En mathématiques, sciences naturelles et de l'ingénieur (MINT), cette proportion est de `r round(mint_share)` % ; et en sciences de la vie (SV), `r round(ls_share)` %, soit presque les trois quarts des publications analysées.
+
+<div class="plot-box">
+<div class="plot-title">Catégories de libre accès par domaine de recherche</div>
+<div class="hide-mobile">
+```{r oa-shares-disp-1, out.width="100%", fig.height=2}
+# Function to create the level 1 color shares plot
+create_color_share_lvl1_plot <- function() {
+  research_area_shares %>%  
+   # Translate research area to respective language version
+    mutate(
+      main_discipline_level1 = translate_research_area(main_discipline_level1, 
+                                                       target_lang = "fr"), 
+      main_discipline_level1 = fct_relevel(main_discipline_level1, 
+                                           c("SHS", "MINT", "SV"))) %>% 
+    ggplot(aes(x = fct_rev(main_discipline_level1), y = freq, 
+               fill = fct_rev(oa_status), 
+               tooltip = paste0("<b>", main_discipline_level1, "</b><br>", 
+                             round(freq * 100), 
+                             " % - ", print_num(n),
+                             " publications",
+                             " publiées en 2018/19 <b>", oa_status, 
+                             "</b>"))) +
+    # Hack: Add a geom_col under the interactive one, only to be able to provide
+    # correct looking legend items (round although bar chart), 
+    # geom_col_interactive does not take the argument 'key_glyph'
+    geom_col(width = 0.1, size = 0.1,
+             # Draw point instead of square symbol
+             key_glyph = draw_key_dotplot
+    ) +
+    geom_col_interactive(color = "white", show.legend = FALSE) +
+    geom_text(aes(label = paste0(round(freq * 100), "%")), 
+              position = position_stack(vjust = 0.5), 
+              size = 3, color = "white", fontface = "bold", 
+              family = "Source Sans Pro") +
+    scale_y_continuous(labels = percent_format(accuracy = 1), 
+                       expand = c(0.03, 0)) +
+    scale_fill_manual(values = oa_colors,  
+                      guide = guide_legend(override.aes = list(size = 6), 
+                                           reverse = TRUE)) +
+    labs(x = NULL, y = NULL) +
+    coord_flip() + 
+    get_datastory_theme(legend_key_size = c(1, 1)) 
+}
+
+# Create ggiraph object
+girafe(ggobj = create_color_share_lvl1_plot(),
+       height_svg = 2, 
+       options = list(
+         opts_toolbar(saveaspng = FALSE),
+         # opts_hover(css = "fill:#F75858;stroke:#F75858;"),
+         opts_tooltip(
+           css = get_ggiraph_tooltip_css(),
+           opacity = 0.8,
+           delay_mouseover = 0,
+           delay_mouseout = 0
+         )
+       ))
+```
+<div class="caption">
+Publications parues en 2018-2019, déclarées au FNS comme résultat de ses subsides, <a href="http://p3.snf.ch/" target="_blank">FNS P3</a>.
+</div>
+</div>
+
+<div class="hide-tablet hide-desktop">
+```{r oa-shares-disp-1-mobile, out.width="100%", fig.height=2}
+create_color_share_lvl1_plot() 
+```
+<div class="caption">
+Publications parues en 2018-2019, déclarées au FNS comme résultat de ses subsides, <a href="http://p3.snf.ch/" target="_blank">FNS P3</a>.
+</div>
+</div>
+
+Plusieurs raisons expliquent ces différences. Ainsi, le choix de revues en libre accès de bonne tenue n’est pas encore suffisant dans tous les domaines de recherche. Les formats de publication autres que les articles scientifiques posent en outre des difficultés supplémentaires pour le passage au libre accès. <a href="http://www.snf.ch/fr/pointrecherche/newsroom/Pages/news-200326-encouragement-de-235-livres-oa.aspx" target="_blank">Le FNS encourage aussi explicitement la publication de livres et de chapitres de livres en libre accès</a>, mais l’écosystème de la publication OA pour ces formats est encore moins développé que pour les articles. La disponibilité des métadonnées pose souvent un autre problème pour les livres et les chapitres. Leur part en libre accès est donc probablement sous-estimée dans l’analyse, de sorte que les valeurs indiquées s’entendent comme une limite basse.
+
+
+```{r discipline-2-text-variable}
+# Summarize and extract some variables for the text
+discipline_2_shares <- pubs %>% 
+  filter(oa_status != "unknown") %>%
+  mutate(is_oa = oa_status %in% c("gold", "green", "hybride")) %>% 
+  count(Discipline_Fr_level2, is_oa) %>% 
+  group_by(Discipline_Fr_level2) %>% 
+  mutate(freq = n / sum(n)) %>% 
+  ungroup() %>% 
+  filter(is_oa == TRUE) %>% 
+  arrange(-freq)
+  
+# Get some variables for the text
+top_share <- discipline_2_shares %>% 
+  slice(1) %>% 
+  pull(freq) * 100
+
+top_2_share <- discipline_2_shares %>% 
+  slice(2) %>% 
+  pull(freq) * 100
+
+bottom_share <- discipline_2_shares %>% 
+  slice(nrow(discipline_2_shares)) %>% 
+  pull(freq) * 100
+
+art_lvl2_name <- 
+  "Arts, musicologie, théâtre et cinéma, architecture"
+
+art_perc <- discipline_2_shares %>% 
+  filter(Discipline_Fr_level2 == art_lvl2_name) %>% 
+  pull(freq) * 100 
+
+art_other_oa_perc <- pubs %>% 
+  filter(oa_status != "unknown", 
+         Discipline_Fr_level2 == art_lvl2_name) %>% 
+  count(oa_status) %>% 
+  mutate(freq = n / sum(n)) %>% 
+  filter(oa_status == "autres OA") %>% 
+  pull(freq) * 100
+```
+
+### Entre `r round(top_share)` et `r round(bottom_share)` %
+
+Les différences sont également importantes d’une discipline à l’autre. La médecine sociale et les sciences biologiques de base sont en tête, `r ifelse(round(top_share) == round(top_2_share), paste0("avec chacune ", round(top_share), " % "), stop("Text error, top shares not equal."))` de publications en libre accès.
+
+La majeure partie des publications qui ne sont pas accessibles concernent les domaines arts, musicologie, théâtre et cinéma, architecture, avec seulement `r round(art_perc)` % en libre accès selon la définition du FNS. Toutefois, un examen attentif montre que la catégorie « autres OA » est très importante, avec `r round(art_other_oa_perc)` % des publications. La qualité des données en SHS, et dans ces disciplines en particulier, est moins bonne que dans les autres domaines de recherche. On manque donc d’informations pour déterminer clairement le statut OA de nombreuses publications.
+
+<div class="plot-box">
+<div class="plot-title">Quelles sont les disciplines qui publient le plus en libre accès ?</div>
+<div class="hide-mobile">
+```{r oa-shares-disp-2, out.width="100%", fig.height=7}
+# Summarize the data for the plot
+plot_data <- pubs %>% 
+  filter(oa_status != "unknown") %>%
+  count(Discipline_Fr_level2, oa_status) %>% 
+  group_by(Discipline_Fr_level2) %>%  
+  mutate(freq = n / sum(n)) %>%
+  ungroup()
+
+# Extract ordering (after closed share)
+plot_ordering <- plot_data %>%
+  filter(oa_status == "restreint") %>% 
+  arrange(freq) %>% 
+  mutate(order = row_number()) %>% 
+  select(Discipline_Fr_level2, order)
+
+# Calculate discipline totals
+plot_totals <- plot_data %>%
+  group_by(Discipline_Fr_level2) %>%  
+  summarise(sum_n = sum(n)) %>% 
+  ungroup() 
+
+# Create the texts for the discipline tooltip (level 3 discipline counts)
+discipline_tooltip <- pubs %>% 
+  # Remove unknowns
+  filter(oa_status != "unknown") %>% 
+  count(Discipline_Fr_level2, Discipline_Fr) %>% 
+  arrange(Discipline_Fr_level2) %>% 
+  group_by(Discipline_Fr_level2) %>%  
+  summarise(disps = paste(paste0(Discipline_Fr, " (", n, ")"), 
+                          collapse = "<br>"))
+
+# Join additional data to the plot data
+plot_data <- plot_data %>%  
+  left_join(plot_ordering, by = "Discipline_Fr_level2") %>% 
+  left_join(plot_totals, by = "Discipline_Fr_level2")
+
+# Join additional data to the ordering data subset
+plot_ordering <- plot_ordering %>%  
+  left_join(discipline_tooltip, by = "Discipline_Fr_level2") %>%  
+  left_join(plot_totals, by = "Discipline_Fr_level2")
+
+# Function to create the level 1 color shares plot
+create_color_share_lvl2_plot <- function() {
+  plot_data %>% 
+    ggplot(aes(x = reorder(Discipline_Fr_level2, -order), y = freq)) + 
+    # Hack: Add a geom_col under the interactive one, only to be able to provide
+    # correct looking legend items (round although bar chart), 
+    # geom_col_interactive does not take the argument 'key_glyph'
+    geom_col(aes(fill = fct_rev(oa_status)), 
+             width = 0.1, size = 0.1,
+             # Draw point instead of square symbol
+             key_glyph = draw_key_dotplot
+    ) +
+    geom_col_interactive(
+      aes(fill = fct_rev(oa_status), 
+          tooltip = paste0("<b>", Discipline_Fr_level2, "</b><br>", 
+                        print_num(n), " publications <b>", 
+                        oa_status, "</b> (<b>", 
+                        round(freq * 100), " %</b>)", 
+                        " publiée en 2018/19")), 
+      color = "white", position = "stack", show.legend = FALSE) +
+    # Percentage label & tooltip
+    geom_text(aes(
+      label = ifelse(freq >= 0.1, paste0(round(freq * 100), "%"), ""),
+      y = (freq + 0.007)),
+      position = position_stack(vjust = 0.5),
+      size = 3, color = "white", fontface = "bold",
+      family = "Source Sans Pro") +
+    # Discipline label & tooltip
+    geom_text_interactive(data = plot_ordering,
+              aes(x = Discipline_Fr_level2, y = -0.025,
+                  tooltip = paste0("<b>", Discipline_Fr_level2, "</b> (", 
+                                print_num(sum_n), 
+                                " publications)<br>", disps),
+                  label = str_trunc(Discipline_Fr_level2, 40)),
+              color = "#4D4D4D", hjust = 1, size = 3,
+              family = "Source Sans Pro") +
+    scale_y_continuous(labels = percent_format(accuracy = 1),
+                       limits = c(-0.65, 1.01), 
+                       breaks = seq(0, 1, 0.25), 
+                       expand = c(0, 0.005)
+                       ) +
+    scale_fill_manual(values = oa_colors, 
+                      guide = guide_legend(override.aes = list(size = 6), 
+                                           reverse = TRUE)) +
+    labs(x = NULL, y = NULL) +
+    coord_flip() + 
+    get_datastory_theme() + 
+    theme(axis.text.y = element_blank())
+}
+
+# Create ggiraph object
+girafe(ggobj = create_color_share_lvl2_plot(),
+       fonts = list(sans = "Source Sans Pro", 
+                    serif = "Source Sans Pro"),
+       height_svg = 7, 
+       options = list(
+         opts_toolbar(saveaspng = FALSE),
+         opts_tooltip(
+           css = get_ggiraph_tooltip_css(),
+           opacity = 0.8,
+           delay_mouseover = 0,
+           delay_mouseout = 0
+         )
+       ))
+```
+<div class="caption">
+Publications parues en 2018-2019, déclarées au FNS comme résultat de ses subsides, <a href="http://p3.snf.ch/" target="_blank">FNS P3</a>.
+</div>
+</div>
+
+<div class="hide-tablet hide-desktop">
+```{r oa-shares-disp-2-mobile, out.width="100%", fig.height=7}
+create_color_share_lvl2_plot()
+```
+<div class="caption">
+Publications parues en 2018-2019, déclarées au FNS comme résultat de ses subsides, <a href="http://p3.snf.ch/" target="_blank">FNS P3</a>.
+</div>
+</div>
+
+## Une augmentation constante de la part en libre accès
+
+La comparaison avec les enquêtes antérieures du FNS sur le libre accès montre trois évolutions :
+
+* La part des publications en libre accès a constamment augmenté. Sur la période 2018-2019, 55 % des publications de recherches financées par le FNS ont été mises à la disposition de toutes les personnes intéressées en libre accès permanent. Entre 2014 et 2018, ce pourcentage était de 48 %, et entre 2013 et 2015, de 39 %.
+* Le nombre de publications disponibles uniquement contre paiement a beaucoup baissé par rapport aux années précédentes. Le FNS continue à chercher à réduire leur proportion de 23 % à zéro.
+* Un nombre légèrement croissant de publications est difficile à classifier clairement. Pour résoudre ce problème, qui est surtout de nature technique, le FNS coopère avec des hautes écoles et des partenaires internationaux pour améliorer l’infrastructure nécessaire.
+
+Les mesures mises en place en 2018, notamment pour encourager la publication d’articles, de livres et de chapitres de livres en libre accès, sont très fortement mises à profit et ont contribué à cette évolution positive. Pour parvenir à une proportion de 100 %, le FNS va encore simplifier le processus de publication en libre accès pour les chercheuses et chercheurs. En complément, il s’efforcera d’aider au développement de nouvelles possibilités de publication en libre accès, en particulier dans les disciplines où l’offre est encore lacunaire.
+
+<div class="plot-box">
+<div class="plot-title">Comparaison avec les résultats des enquêtes libre accès précédentes</div>
+<div class="hide-mobile">
+```{r former-oa-monitorings, out.width="100%", fig.height=3}
+# Data of OA monitorings since 2013
+former_monitorings <- tibble(window = c("2013-2015", 
+                                        "2014-2018", 
+                                        "2018-2019"), 
+                             open_perc = c(39, 48, 55), 
+                             closed_perc = c(44, 33, 23), 
+                             other_oa_perc = c(17, 19, 22)) %>%  
+  # To long format
+  pivot_longer(cols = c(open_perc, closed_perc, other_oa_perc))
+
+# Function to create the former monitorings plot
+create_former_monitoring_plot <- function() {
+  former_monitorings %>%  
+     # Ordering and labels
+    mutate(
+      name = case_when(name == "closed_perc" ~ "restreint", 
+                       name == "open_perc" ~ "FNS OA (gold, green, hybride)", 
+                       name == "other_oa_perc" ~ "autres OA", 
+                       TRUE ~ "Unknown"), 
+      name = fct_relevel(name, c("FNS OA (gold, green, hybride)", 
+                                 "autres OA", 
+                                 "restreint"))) %>% 
+    ggplot(aes(x = name, y = value, fill = window, 
+               tooltip = paste0(window, ", ", value, "% ", name))) + 
+       # Hack: Add a geom_col under the interactive one, only to be able to provide
+    # correct looking legend items (round although bar chart), 
+    # geom_col_interactive does not take the argument 'key_glyph'
+    geom_col(position = position_dodge(width = 0.5), 
+             width = 0.1, size = 0.1,
+             # Draw point instead of square symbol
+             key_glyph = draw_key_dotplot
+    ) +
+    geom_col_interactive(position = position_dodge(width = 0.5), width = 0.5, 
+             color = "white", show.legend = FALSE) + 
+    geom_text(aes(label = paste0(value, "%"), 
+                  y = (value - 6)), hjust = 0.5, color = "white", 
+              fontface = "bold", 
+              position = position_dodge(width = 0.5), size = 3) +
+    scale_y_continuous(labels = percent_format(accuracy = 1, scale = 1), 
+                       limits = c(0, 60), breaks = seq(0, 60, 10)) +
+    scale_fill_manual(values = get_datastory_scheme(palette = "blue_seq")) +
+    labs(x = NULL, y = NULL) + 
+    get_datastory_theme(text_axis = "x")
+}
+
+# Create ggiraph object
+girafe(ggobj = create_former_monitoring_plot(), 
+       height_svg = 2.5, 
+       options = list(
+         opts_toolbar(saveaspng = FALSE),
+         # opts_hover(css = "fill:#F75858;stroke:#F75858;"),
+         opts_tooltip(
+           css = get_ggiraph_tooltip_css(),
+           opacity = 0.8,
+           delay_mouseover = 0,
+           delay_mouseout = 0
+         )
+       ))
+```
+<div class="caption">
+Publications parues en 2018-2019, déclarées au FNS comme résultat de ses subsides, <a href="http://p3.snf.ch/" target="_blank">FNS P3</a>. La base de données est en constante évolution ; les résultats des enquêtes libre accès antérieures sont des instantanés aux dates respectives des enquêtes.
+</div>
+</div>
+
+<div class="hide-tablet hide-desktop">
+```{r former-oa-monitorings-mobile, out.width="100%", fig.height=3}
+create_former_monitoring_plot()
+```
+<div class="caption">
+Publications parues en 2018-2019, déclarées au FNS comme résultat de ses subsides, <a href="http://p3.snf.ch/" target="_blank">FNS P3</a>. La base de données est en constante évolution ; les résultats des enquêtes libre accès antérieures sont des instantanés aux dates respectives des enquêtes.
+</div>
+</div>
+
+<div class='info-box'>
+
+### Catégories de libre accès 
+
+Les différents types de libre accès sont définis suivant les catégories ci-dessous. __Gold__, __green__ et __hybride__ satisfont les engagements du FNS en matière de libre accès.
+
+* __Gold__ : libre accès immédiat dans une revue dont les articles sont exclusivement en libre accès ou sous forme de livres ou de chapitres en libre accès, généralement après paiement d’une redevance.
+* __Green__ : libre accès en tant que publication secondaire dans une base de données institutionnelle ou disciplinaire, souvent après l’expiration d’une période d’embargo.
+* __Hybride__ : libre accès dans une revue par ailleurs non ouverte après paiement de frais d’activation.
+* __Autres OA__ : en libre accès, sans remplir les critères des autres catégories.
+* __Restreint__ : aucune version en libre accès n’a été trouvée.
+
+
+### Données
+
+* Publications : Publications parues en 2018-2019, déclarées au FNS comme résultat de ses subsides, <a href="http://p3.snf.ch/" target="_blank">FNS P3</a>.
+    + hors publications non évaluées par les pairs (peer review)
+    + hors publications de type « livre »
+    + hors publications sans DOI
+* La source des métadonnées spécifiques sur le libre accès (version OA, lieu de dépôt, etc.) est le fournisseur de données <a href="https://unpaywall.org/" target="_blank">Unpaywall</a>
+* Date de l’analyse : 14 décembre 2020
+
+</div>
